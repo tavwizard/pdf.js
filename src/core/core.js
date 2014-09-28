@@ -311,7 +311,7 @@ var PDFDocument = (function PDFDocumentClosure() {
     var str = strBuf.join('');
     stream.pos = pos;
     var index = backwards ? str.lastIndexOf(needle) : str.indexOf(needle);
-    if (index == -1) {
+    if (index === -1) {
       return false; /* not found */
     }
     stream.pos += index;
@@ -358,22 +358,15 @@ var PDFDocument = (function PDFDocumentClosure() {
     },
 
     get linearization() {
-      var length = this.stream.length;
-      var linearization = false;
-      if (length) {
+      var linearization = null;
+      if (this.stream.length) {
         try {
-          linearization = new Linearization(this.stream);
-          if (linearization.length != length) {
-            linearization = false;
-          }
+          linearization = Linearization.create(this.stream);
         } catch (err) {
           if (err instanceof MissingDataException) {
             throw err;
           }
-
-          info('The linearization data is not available ' +
-               'or unreadable PDF data is found');
-          linearization = false;
+          info(err);
         }
       }
       // shadow the prototype getter with a data property

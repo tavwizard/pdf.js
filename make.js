@@ -44,10 +44,12 @@ var ROOT_DIR = __dirname + '/', // absolute path to project's root
     B2G_BUILD_DIR = BUILD_DIR + '/b2g/',
     JSDOC_DIR = BUILD_DIR + 'jsdoc',
     EXTENSION_SRC_DIR = 'extensions/',
+    FIREFOX_CONTENT_DIR = EXTENSION_SRC_DIR + '/firefox/content/',
     LOCALE_SRC_DIR = 'l10n/',
     GH_PAGES_DIR = BUILD_DIR + 'gh-pages/',
     GENERIC_DIR = BUILD_DIR + 'generic/',
     MINIFIED_DIR = BUILD_DIR + 'minified/',
+    SINGLE_FILE_DIR = BUILD_DIR + '/singlefile/',
     REPO = 'git@github.com:tavwizard/pdf.js.git',
     MOZCENTRAL_PREF_PREFIX = 'pdfjs',
     FIREFOX_PREF_PREFIX = 'extensions.uriloader@pdf.js',
@@ -91,8 +93,12 @@ var COMMON_WEB_FILES =
        'web/debugger.js'],
     COMMON_WEB_FILES_PREPROCESS =
       ['web/viewer.js',
-       'web/viewer.html'];
-
+       'web/viewer.html'],
+    COMMON_FIREFOX_FILES_PREPROCESS =
+      [FIREFOX_CONTENT_DIR + 'PdfStreamConverter.jsm',
+       FIREFOX_CONTENT_DIR + 'PdfjsContentUtils.jsm',
+       FIREFOX_CONTENT_DIR + 'PdfjsChromeUtils.jsm',
+       FIREFOX_CONTENT_DIR + 'PdfRedirector.jsm'];
 //
 // make generic
 // Builds the generic production viewer that should be compatible with most
@@ -184,6 +190,7 @@ target.web = function() {
   mkdir('-p', GH_PAGES_DIR + EXTENSION_SRC_DIR + '/chromium');
   mkdir('-p', GH_PAGES_DIR + EXTENSION_SRC_DIR + '/b2g');
   mkdir('-p', GH_PAGES_DIR + '/api/draft/');
+  mkdir('-p', GH_PAGES_DIR + '/examples/');
 
   cp('-R', GENERIC_DIR + '/*', GH_PAGES_DIR);
   cp(FIREFOX_BUILD_DIR + '/*.xpi', FIREFOX_BUILD_DIR + '/*.rdf',
@@ -191,6 +198,7 @@ target.web = function() {
   cp(CHROME_BUILD_DIR + '/*.crx', FIREFOX_BUILD_DIR + '/*.rdf',
      GH_PAGES_DIR + EXTENSION_SRC_DIR + 'chromium/');
   cp('-R', 'test/features', GH_PAGES_DIR);
+  cp('-R', 'examples/learning', GH_PAGES_DIR + '/examples/');
   cp('-R', B2G_BUILD_DIR, GH_PAGES_DIR + EXTENSION_SRC_DIR + 'b2g/');
   cp('-R', JSDOC_DIR + '/*', GH_PAGES_DIR + '/api/draft/');
 
@@ -219,6 +227,81 @@ target.web = function() {
 };
 
 target.dist = function() {
+  target.generic();
+  target.singlefile();
+  var DIST_DIR = BUILD_DIR + 'dist/';
+  var DIST_REPO_URL = 'https://github.com/mozilla/pdfjs-dist';
+  cd(ROOT_DIR);
+  echo();
+  echo('### Cloning baseline distribution');
+  rm('-rf', DIST_DIR);
+  mkdir('-p', DIST_DIR);
+  exec('git clone --depth 1 ' + DIST_REPO_URL + ' ' + DIST_DIR);
+  echo();
+  echo('### Overwriting all files');
+  rm('-rf', DIST_DIR + '*');
+  cp('-R', ROOT_DIR + 'external/dist/*', DIST_DIR);
+  cp('-R', GENERIC_DIR + 'LICENSE', DIST_DIR);
+  cp('-R', GENERIC_DIR + 'web/cmaps', DIST_DIR);
+  mkdir('-p', DIST_DIR + 'build/');
+  cp('-R', [
+    GENERIC_DIR + 'build/pdf.js',
+    GENERIC_DIR + 'build/pdf.worker.js',
+    SINGLE_FILE_DIR + 'build/pdf.combined.js',
+  ], DIST_DIR + 'build/');
+  mkdir('-p', DIST_DIR + 'web/');
+  cp('-R', [
+    GENERIC_DIR + 'web/compatibility.js',
+  ], DIST_DIR + 'web/');
+  echo();
+  echo('### Rebuilding manifests');
+  var DIST_NAME = 'pdfjs-dist';
+  var DIST_DESCRIPTION = 'Generic build of Mozilla\'s PDF.js library.';
+  var DIST_KEYWORDS = ['Mozilla', 'pdf', 'pdf.js'];
+  var DIST_HOMEPAGE = 'http://mozilla.github.io/pdf.js/';
+  var DIST_BUGS_URL = 'https://github.com/mozilla/pdf.js/issues';
+  var DIST_LICENSE = 'Apache-2.0';
+  var npmManifest = {
+    name: DIST_NAME,
+    version: VERSION,
+    description: DIST_DESCRIPTION,
+    keywords: DIST_KEYWORDS,
+    homepage: DIST_HOMEPAGE,
+    bugs: DIST_BUGS_URL,
+    license: DIST_LICENSE,
+    repository: {
+      type: 'git',
+      url: DIST_REPO_URL
+    },
+  };
+  fs.writeFileSync(DIST_DIR + 'package.json',
+                   JSON.stringify(npmManifest, null, 2));
+  var bowerManifest = {
+    name: DIST_NAME,
+    version: VERSION,
+    main: [
+      'build/pdf.js',
+      'build/pdf.worker.js',
+    ],
+    ignore: [],
+    keywords: DIST_KEYWORDS,
+  };
+  fs.writeFileSync(DIST_DIR + 'bower.json',
+                   JSON.stringify(bowerManifest, null, 2));
+  echo();
+  echo('### Commiting changes');
+  cd(DIST_DIR);
+  var message = 'PDF.js version ' + VERSION;
+  exec('git add *');
+  exec('git commit -am \"' + message + '\"');
+  exec('git tag -a v' + VERSION + ' -m \"' + message + '\"');
+  cd(ROOT_DIR);
+  echo();
+  echo('Done. Push with');
+  echo('  cd ' + DIST_DIR + '; git push --tags ' + DIST_REPO_URL + ' master');
+  echo();
+};
+target.publish = function() {
   target.generic();
   config.stableVersion = config.betaVersion;
   config.betaVersion = VERSION;
@@ -370,7 +453,6 @@ target.bundle = function(args) {
 
   var SHARED_SRC_FILES = [
     'shared/util.js',
-    'shared/annotation.js',
   ];
 
   var MAIN_SRC_FILES = SHARED_SRC_FILES.concat([
@@ -379,7 +461,9 @@ target.bundle = function(args) {
     'display/canvas.js',
     'display/webgl.js',
     'display/pattern_helper.js',
-    'display/font_loader.js'
+    'display/font_loader.js',
+    'display/annotation_helper.js',
+    'display/svg.js'
   ]);
 
   var srcFiles = builder.getWorkerSrcFiles('src/worker_loader.js');
@@ -417,7 +501,6 @@ target.singlefile = function() {
   echo();
   echo('### Creating singlefile build');
 
-  var SINGLE_FILE_DIR = BUILD_DIR + '/singlefile/';
   var SINGLE_FILE_TARGET = BUILD_DIR + 'pdf.combined.js';
 
   var defines = builder.merge(DEFINES, {SINGLE_FILE: true});
@@ -583,7 +666,6 @@ target.firefox = function() {
 
   var FIREFOX_BUILD_CONTENT_DIR = FIREFOX_BUILD_DIR + '/content/',
       FIREFOX_EXTENSION_DIR = 'extensions/firefox/',
-      FIREFOX_CONTENT_DIR = EXTENSION_SRC_DIR + '/firefox/content/',
       FIREFOX_EXTENSION_FILES_TO_COPY =
         ['*.js',
          '*.rdf',
@@ -591,6 +673,7 @@ target.firefox = function() {
          '*.png',
          '*.manifest',
          'locale',
+         'chrome',
          '../../LICENSE'],
       FIREFOX_EXTENSION_FILES =
         ['bootstrap.js',
@@ -599,6 +682,7 @@ target.firefox = function() {
          'icon.png',
          'icon64.png',
          'content',
+         'chrome',
          'locale',
          'LICENSE'],
       FIREFOX_EXTENSION_NAME = 'pdf.js.xpi',
@@ -638,9 +722,7 @@ target.firefox = function() {
     preprocess: [
       [COMMON_WEB_FILES_PREPROCESS, FIREFOX_BUILD_CONTENT_DIR + '/web'],
       [BUILD_TARGETS, FIREFOX_BUILD_CONTENT_DIR + BUILD_DIR],
-      [FIREFOX_CONTENT_DIR + 'PdfStreamConverter.jsm',
-       FIREFOX_BUILD_CONTENT_DIR],
-      [FIREFOX_CONTENT_DIR + 'PdfRedirector.jsm', FIREFOX_BUILD_CONTENT_DIR],
+      [COMMON_FIREFOX_FILES_PREPROCESS, FIREFOX_BUILD_CONTENT_DIR],
       [SRC_DIR + 'core/network.js', FIREFOX_BUILD_CONTENT_DIR],
       [FIREFOX_EXTENSION_DIR + 'bootstrap.js', FIREFOX_BUILD_DIR]
     ],
@@ -653,6 +735,7 @@ target.firefox = function() {
 
   cleanupJSSource(FIREFOX_BUILD_CONTENT_DIR + '/web/viewer.js');
   cleanupJSSource(FIREFOX_BUILD_DIR + 'bootstrap.js');
+  cleanupJSSource(FIREFOX_BUILD_CONTENT_DIR + 'PdfjsChromeUtils.jsm');
 
   // Remove '.DS_Store' and other hidden files
   find(FIREFOX_BUILD_DIR).forEach(function(file) {
@@ -673,6 +756,8 @@ target.firefox = function() {
       FIREFOX_BUILD_CONTENT_DIR + 'PdfStreamConverter.jsm');
   sed('-i', /PDFJSSCRIPT_MOZ_CENTRAL/, 'false',
       FIREFOX_BUILD_CONTENT_DIR + 'PdfStreamConverter.jsm');
+  sed('-i', /PDFJSSCRIPT_PREF_PREFIX/, FIREFOX_PREF_PREFIX,
+      FIREFOX_BUILD_CONTENT_DIR + 'PdfjsChromeUtils.jsm');
 
   // Update localized metadata
   var localizedMetadata = cat(EXTENSION_SRC_DIR + '/firefox/metadata.inc');
@@ -756,10 +841,10 @@ target.mozcentral = function() {
     ],
     preprocess: [
       [COMMON_WEB_FILES_PREPROCESS, MOZCENTRAL_CONTENT_DIR + '/web'],
+      [FIREFOX_CONTENT_DIR + 'pdfjschildbootstrap.js', MOZCENTRAL_CONTENT_DIR],
       [BUILD_TARGETS, MOZCENTRAL_CONTENT_DIR + BUILD_DIR],
       [SRC_DIR + 'core/network.js', MOZCENTRAL_CONTENT_DIR],
-      [FIREFOX_CONTENT_DIR + 'PdfStreamConverter.jsm', MOZCENTRAL_CONTENT_DIR],
-      [FIREFOX_CONTENT_DIR + 'PdfRedirector.jsm', MOZCENTRAL_CONTENT_DIR],
+      [COMMON_FIREFOX_FILES_PREPROCESS, MOZCENTRAL_CONTENT_DIR],
       [FIREFOX_CONTENT_DIR + 'PdfJs.jsm', MOZCENTRAL_CONTENT_DIR]
     ],
     preprocessCSS: [
@@ -772,6 +857,7 @@ target.mozcentral = function() {
 
   cleanupJSSource(MOZCENTRAL_CONTENT_DIR + '/web/viewer.js');
   cleanupJSSource(MOZCENTRAL_CONTENT_DIR + '/PdfJs.jsm');
+  cleanupJSSource(MOZCENTRAL_CONTENT_DIR + '/PdfjsChromeUtils.jsm');
 
   // Remove '.DS_Store' and other hidden files
   find(MOZCENTRAL_DIR).forEach(function(file) {
@@ -802,6 +888,8 @@ target.mozcentral = function() {
       MOZCENTRAL_CONTENT_DIR + 'PdfStreamConverter.jsm');
   sed('-i', /PDFJSSCRIPT_MOZ_CENTRAL/, 'true',
       MOZCENTRAL_CONTENT_DIR + 'PdfStreamConverter.jsm');
+  sed('-i', /PDFJSSCRIPT_PREF_PREFIX/, MOZCENTRAL_PREF_PREFIX,
+      MOZCENTRAL_CONTENT_DIR + 'PdfjsChromeUtils.jsm');
 
   // Copy test files
   mkdir('-p', MOZCENTRAL_TEST_DIR);
@@ -878,6 +966,7 @@ target.chromium = function() {
         'extensions/chromium/*.css',
         'extensions/chromium/icon*.png',],
        CHROME_BUILD_DIR],
+      ['extensions/chromium/pageAction/*.*', CHROME_BUILD_DIR + '/pageAction'],
       ['external/webL10n/l10n.js', CHROME_BUILD_CONTENT_DIR + '/web'],
       ['web/viewer.css', CHROME_BUILD_CONTENT_DIR + '/web'],
       ['external/bcmaps/*', CHROME_BUILD_CONTENT_DIR + '/web/cmaps'],
@@ -1209,7 +1298,7 @@ target.mozcentralcheck = function() {
     echo('Please specify MC_PATH variable');
     exit(1);
   }
-  if ((mcPath[0] != '/' && mcPath[0] != '~' && mcPath[1] != ':') ||
+  if ((mcPath[0] !== '/' && mcPath[0] !== '~' && mcPath[1] !== ':') ||
       !test('-d', mcPath)) {
     echo('mozilla-central path is not in absolute form or does not exist.');
     exit(1);

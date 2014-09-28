@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/* globals ArithmeticDecoder, error, globalScope, log2, readUint16, readUint32,
+/* globals ArithmeticDecoder, globalScope, log2, readUint16, readUint32,
            warn */
 
 'use strict';
@@ -58,7 +58,7 @@ var JpxImage = (function JpxImageClosure() {
           lbox = length - position + headerSize;
         }
         if (lbox < headerSize) {
-          error('JPX error: Invalid box field size');
+          throw new Error('JPX Error: Invalid box field size');
         }
         var dataLength = lbox - headerSize;
         var jumpDataLength = true;
@@ -82,41 +82,34 @@ var JpxImage = (function JpxImageClosure() {
       }
     },
     parseImageProperties: function JpxImage_parseImageProperties(stream) {
-      try {
-        var newByte = stream.getByte();
-        while (newByte >= 0) {
-          var oldByte = newByte;
-          newByte = stream.getByte();
-          var code = (oldByte << 8) | newByte;
-          // Image and tile size (SIZ)
-          if (code == 0xFF51) {
-            stream.skip(4);
-            var Xsiz = stream.getInt32() >>> 0; // Byte 4
-            var Ysiz = stream.getInt32() >>> 0; // Byte 8
-            var XOsiz = stream.getInt32() >>> 0; // Byte 12
-            var YOsiz = stream.getInt32() >>> 0; // Byte 16
-            stream.skip(16);
-            var Csiz = stream.getUint16(); // Byte 36
-            this.width = Xsiz - XOsiz;
-            this.height = Ysiz - YOsiz;
-            this.componentsCount = Csiz;
-            // Results are always returned as Uint8Arrays
-            this.bitsPerComponent = 8;
-            return;
-          }
-        }
-        throw 'No size marker found in JPX stream';
-      } catch (e) {
-        if (this.failOnCorruptedImage) {
-          error('JPX error: ' + e);
-        } else {
-          warn('JPX error: ' + e + '. Trying to recover');
+      var newByte = stream.getByte();
+      while (newByte >= 0) {
+        var oldByte = newByte;
+        newByte = stream.getByte();
+        var code = (oldByte << 8) | newByte;
+        // Image and tile size (SIZ)
+        if (code === 0xFF51) {
+          stream.skip(4);
+          var Xsiz = stream.getInt32() >>> 0; // Byte 4
+          var Ysiz = stream.getInt32() >>> 0; // Byte 8
+          var XOsiz = stream.getInt32() >>> 0; // Byte 12
+          var YOsiz = stream.getInt32() >>> 0; // Byte 16
+          stream.skip(16);
+          var Csiz = stream.getUint16(); // Byte 36
+          this.width = Xsiz - XOsiz;
+          this.height = Ysiz - YOsiz;
+          this.componentsCount = Csiz;
+          // Results are always returned as Uint8Arrays
+          this.bitsPerComponent = 8;
+          return;
         }
       }
+      throw new Error('JPX Error: No size marker found in JPX stream');
     },
     parseCodestream: function JpxImage_parseCodestream(data, start, end) {
       var context = {};
       try {
+        var doNotRecover = false;
         var position = start;
         while (position + 1 < end) {
           var code = readUint16(data, position);
@@ -160,6 +153,11 @@ var JpxImage = (function JpxImageClosure() {
               context.QCC = [];
               context.COC = [];
               break;
+            case 0xFF55: // Tile-part lengths, main header (TLM)
+              var Ltlm = readUint16(data, position); // Marker segment length
+              // Skip tile length markers
+              position += Ltlm;
+              break;
             case 0xFF5C: // Quantization default (QCD)
               length = readUint16(data, position);
               var qcd = {};
@@ -179,15 +177,15 @@ var JpxImage = (function JpxImageClosure() {
                   scalarExpounded = true;
                   break;
                 default:
-                  throw 'Invalid SQcd value ' + sqcd;
+                  throw new Error('JPX Error: Invalid SQcd value ' + sqcd);
               }
-              qcd.noQuantization = (spqcdSize == 8);
+              qcd.noQuantization = (spqcdSize === 8);
               qcd.scalarExpounded = scalarExpounded;
               qcd.guardBits = sqcd >> 5;
               spqcds = [];
               while (j < length + position) {
                 var spqcd = {};
-                if (spqcdSize == 8) {
+                if (spqcdSize === 8) {
                   spqcd.epsilon = data[j++] >> 3;
                   spqcd.mu = 0;
                 } else {
@@ -231,15 +229,15 @@ var JpxImage = (function JpxImageClosure() {
                   scalarExpounded = true;
                   break;
                 default:
-                  throw 'Invalid SQcd value ' + sqcd;
+                  throw new Error('JPX Error: Invalid SQcd value ' + sqcd);
               }
-              qcc.noQuantization = (spqcdSize == 8);
+              qcc.noQuantization = (spqcdSize === 8);
               qcc.scalarExpounded = scalarExpounded;
               qcc.guardBits = sqcd >> 5;
               spqcds = [];
               while (j < (length + position)) {
                 spqcd = {};
-                if (spqcdSize == 8) {
+                if (spqcdSize === 8) {
                   spqcd.epsilon = data[j++] >> 3;
                   spqcd.mu = 0;
                 } else {
@@ -291,16 +289,33 @@ var JpxImage = (function JpxImageClosure() {
                 }
                 cod.precinctsSizes = precinctsSizes;
               }
-
-              if (cod.sopMarkerUsed || cod.ephMarkerUsed ||
-                  cod.selectiveArithmeticCodingBypass ||
-                  cod.resetContextProbabilities ||
-                  cod.terminationOnEachCodingPass ||
-                  cod.verticalyStripe || cod.predictableTermination) {
-                throw 'Unsupported COD options: ' +
-                  globalScope.JSON.stringify(cod);
+              var unsupported = [];
+              if (cod.sopMarkerUsed) {
+                unsupported.push('sopMarkerUsed');
               }
-
+              if (cod.ephMarkerUsed) {
+                unsupported.push('ephMarkerUsed');
+              }
+              if (cod.selectiveArithmeticCodingBypass) {
+                unsupported.push('selectiveArithmeticCodingBypass');
+              }
+              if (cod.resetContextProbabilities) {
+                unsupported.push('resetContextProbabilities');
+              }
+              if (cod.terminationOnEachCodingPass) {
+                unsupported.push('terminationOnEachCodingPass');
+              }
+              if (cod.verticalyStripe) {
+                unsupported.push('verticalyStripe');
+              }
+              if (cod.predictableTermination) {
+                unsupported.push('predictableTermination');
+              }
+              if (unsupported.length > 0) {
+                doNotRecover = true;
+                throw new Error('JPX Error: Unsupported COD options (' +
+                                unsupported.join(', ') + ')');
+              }
               if (context.mainHeader) {
                 context.COD = cod;
               } else {
@@ -343,17 +358,19 @@ var JpxImage = (function JpxImageClosure() {
               // skipping content
               break;
             case 0xFF53: // Coding style component (COC)
-              throw 'Codestream code 0xFF53 (COC) is not implemented';
+              throw new Error('JPX Error: Codestream code 0xFF53 (COC) is ' +
+                              'not implemented');
             default:
-              throw 'Unknown codestream code: ' + code.toString(16);
+              throw new Error('JPX Error: Unknown codestream code: ' +
+                              code.toString(16));
           }
           position += length;
         }
       } catch (e) {
-        if (this.failOnCorruptedImage) {
-          error('JPX error: ' + e);
+        if (doNotRecover || this.failOnCorruptedImage) {
+          throw e;
         } else {
-          warn('JPX error: ' + e + '. Trying to recover');
+          warn('Trying to recover from ' + e.message);
         }
       }
       this.tiles = transformComponents(context);
@@ -518,7 +535,7 @@ var JpxImage = (function JpxImageClosure() {
       codeblockWidth: xcb_,
       codeblockHeight: ycb_,
       numcodeblockwide: cbx1 - cbx0 + 1,
-      numcodeblockhigh: cby1 - cby1 + 1
+      numcodeblockhigh: cby1 - cby0 + 1
     };
     subband.codeblocks = codeblocks;
     subband.precincts = precincts;
@@ -533,7 +550,7 @@ var JpxImage = (function JpxImageClosure() {
       var codeblocks = subband.codeblocks;
       for (var j = 0, jj = codeblocks.length; j < jj; j++) {
         var codeblock = codeblocks[j];
-        if (codeblock.precinctNumber != precinctNumber) {
+        if (codeblock.precinctNumber !== precinctNumber) {
           continue;
         }
         precinctCodeblocks.push(codeblock);
@@ -581,7 +598,7 @@ var JpxImage = (function JpxImageClosure() {
         }
         r = 0;
       }
-      throw 'Out of packets';
+      throw new Error('JPX Error: Out of packets');
     };
   }
   function ResolutionLayerComponentPositionIterator(context) {
@@ -621,7 +638,7 @@ var JpxImage = (function JpxImageClosure() {
         }
         l = 0;
       }
-      throw 'Out of packets';
+      throw new Error('JPX Error: Out of packets');
     };
   }
   function buildPackets(context) {
@@ -716,7 +733,8 @@ var JpxImage = (function JpxImageClosure() {
           new ResolutionLayerComponentPositionIterator(context);
         break;
       default:
-        throw 'Unsupported progression order ' + progressionOrder;
+        throw new Error('JPX Error: Unsupported progression order ' +
+                        progressionOrder);
     }
   }
   function parseTilePackets(context, data, offset, dataLength) {
@@ -734,7 +752,7 @@ var JpxImage = (function JpxImageClosure() {
           buffer = (buffer << 8) | b;
           bufferSize += 8;
         }
-        if (b == 0xFF) {
+        if (b === 0xFF) {
           skipNextBit = true;
         }
       }
@@ -1241,7 +1259,7 @@ var JpxImage = (function JpxImageClosure() {
           level.index = index;
           var value = level.items[index];
 
-          if (value == 0xFF) {
+          if (value === 0xFF) {
             break;
           }
 
@@ -1319,8 +1337,8 @@ var JpxImage = (function JpxImageClosure() {
       this.width = width;
       this.height = height;
 
-      this.contextLabelTable = (subband == 'HH' ? HHContextLabel :
-        (subband == 'HL' ? HLContextLabel : LLAndLHContextsLabel));
+      this.contextLabelTable = (subband === 'HH' ? HHContextLabel :
+        (subband === 'HL' ? HLContextLabel : LLAndLHContextsLabel));
 
       var coefficientCount = width * height;
 
@@ -1558,8 +1576,8 @@ var JpxImage = (function JpxImageClosure() {
           var checkAllEmpty = i0 + 3 < height;
           for (var j = 0; j < width; j++) {
             var index0 = indexBase + j;
-            // using the property: labels[neighborsSignificance[index]] == 0
-            // when neighborsSignificance[index] == 0
+            // using the property: labels[neighborsSignificance[index]] === 0
+            // when neighborsSignificance[index] === 0
             var allEmpty = (checkAllEmpty &&
               processingFlags[index0] === 0 &&
               processingFlags[index0 + oneRowDown] === 0 &&
@@ -1628,8 +1646,8 @@ var JpxImage = (function JpxImageClosure() {
                      (decoder.readBit(contexts, UNIFORM_CONTEXT) << 2) |
                      (decoder.readBit(contexts, UNIFORM_CONTEXT) << 1) |
                       decoder.readBit(contexts, UNIFORM_CONTEXT);
-        if (symbol != 0xA) {
-          throw 'Invalid segmentation symbol';
+        if (symbol !== 0xA) {
+          throw new Error('JPX Error: Invalid segmentation symbol');
         }
       }
     };

@@ -98,12 +98,12 @@ var Dict = (function DictClosure() {
     get: function Dict_get(key1, key2, key3) {
       var value;
       var xref = this.xref;
-      if (typeof (value = this.map[key1]) != 'undefined' || key1 in this.map ||
-          typeof key2 == 'undefined') {
+      if (typeof (value = this.map[key1]) !== 'undefined' || key1 in this.map ||
+          typeof key2 === 'undefined') {
         return xref ? xref.fetchIfRef(value) : value;
       }
-      if (typeof (value = this.map[key2]) != 'undefined' || key2 in this.map ||
-          typeof key3 == 'undefined') {
+      if (typeof (value = this.map[key2]) !== 'undefined' || key2 in this.map ||
+          typeof key3 === 'undefined') {
         return xref ? xref.fetchIfRef(value) : value;
       }
       value = this.map[key3] || null;
@@ -218,7 +218,17 @@ var Ref = (function RefClosure() {
     this.gen = gen;
   }
 
-  Ref.prototype = {};
+  Ref.prototype = {
+    toString: function Ref_toString() {
+      // This function is hot, so we make the string as compact as possible.
+      // |this.gen| is almost always zero, so we treat that case specially.
+      var str = this.num + 'R';
+      if (this.gen !== 0) {
+        str += this.gen;
+      }
+      return str;
+    }
+  };
 
   return Ref;
 })();
@@ -232,15 +242,15 @@ var RefSet = (function RefSetClosure() {
 
   RefSet.prototype = {
     has: function RefSet_has(ref) {
-      return ('R' + ref.num + '.' + ref.gen) in this.dict;
+      return ref.toString() in this.dict;
     },
 
     put: function RefSet_put(ref) {
-      this.dict['R' + ref.num + '.' + ref.gen] = true;
+      this.dict[ref.toString()] = true;
     },
 
     remove: function RefSet_remove(ref) {
-      delete this.dict['R' + ref.num + '.' + ref.gen];
+      delete this.dict[ref.toString()];
     }
   };
 
@@ -254,19 +264,19 @@ var RefSetCache = (function RefSetCacheClosure() {
 
   RefSetCache.prototype = {
     get: function RefSetCache_get(ref) {
-      return this.dict['R' + ref.num + '.' + ref.gen];
+      return this.dict[ref.toString()];
     },
 
     has: function RefSetCache_has(ref) {
-      return ('R' + ref.num + '.' + ref.gen) in this.dict;
+      return ref.toString() in this.dict;
     },
 
     put: function RefSetCache_put(ref, obj) {
-      this.dict['R' + ref.num + '.' + ref.gen] = obj;
+      this.dict[ref.toString()] = obj;
     },
 
     putAlias: function RefSetCache_putAlias(ref, aliasRef) {
-      this.dict['R' + ref.num + '.' + ref.gen] = this.get(aliasRef);
+      this.dict[ref.toString()] = this.get(aliasRef);
     },
 
     forEach: function RefSetCache_forEach(fn, thisArg) {
@@ -573,7 +583,7 @@ var Catalog = (function CatalogClosure() {
               }
               nodesToVisit.push(obj);
               next();
-            }.bind(this), capability.reject.bind(capability));
+            }, capability.reject);
             return;
           }
 
@@ -642,7 +652,7 @@ var Catalog = (function CatalogClosure() {
           for (var i = 0; i < kids.length; i++) {
             var kid = kids[i];
             assert(isRef(kid), 'kids must be a ref');
-            if (kid.num == kidRef.num) {
+            if (kid.num === kidRef.num) {
               found = true;
               break;
             }
@@ -692,6 +702,10 @@ var XRef = (function XRefClosure() {
     // prepare the XRef cache
     this.cache = [];
     this.password = password;
+    this.stats = {
+      streamTypes: [],
+      fontTypes: []
+    };
   }
 
   XRef.prototype = {
@@ -821,8 +835,6 @@ var XRef = (function XRefClosure() {
           // Validate entry obj
           if (!isInt(entry.offset) || !isInt(entry.gen) ||
               !(entry.free || entry.uncompressed)) {
-            console.log(entry.offset, entry.gen, entry.free,
-                        entry.uncompressed);
             error('Invalid entry in XRef subsection: ' + first + ', ' + count);
           }
 
@@ -962,7 +974,7 @@ var XRef = (function XRefClosure() {
         // finding byte sequence
         while (offset < dataLength) {
           var i = 0;
-          while (i < length && data[offset + i] == what[i]) {
+          while (i < length && data[offset + i] === what[i]) {
             ++i;
           }
           if (i >= length) {
@@ -1040,7 +1052,7 @@ var XRef = (function XRefClosure() {
       var dict;
       for (i = 0, ii = trailers.length; i < ii; ++i) {
         stream.pos = trailers[i];
-        var parser = new Parser(new Lexer(stream), true, null);
+        var parser = new Parser(new Lexer(stream), true, this);
         var obj = parser.getObj();
         if (!isCmd(obj, 'trailer')) {
           continue;
@@ -1072,7 +1084,7 @@ var XRef = (function XRefClosure() {
 
           stream.pos = startXRef + stream.start;
 
-          var parser = new Parser(new Lexer(stream), true, null);
+          var parser = new Parser(new Lexer(stream), true, this);
           var obj = parser.getObj();
           var dict;
 
@@ -1175,9 +1187,10 @@ var XRef = (function XRefClosure() {
       } else {
         xrefEntry = this.fetchCompressed(xrefEntry, suppressEncryption);
       }
-
-      if (isDict(xrefEntry)) {
-        xrefEntry.objId = 'R' + ref.num + '.' + ref.gen;
+      if (isDict(xrefEntry)){
+        xrefEntry.objId = ref.toString();
+      } else if (isStream(xrefEntry)) {
+        xrefEntry.dict.objId = ref.toString();
       }
       return xrefEntry;
     },
@@ -1211,15 +1224,7 @@ var XRef = (function XRefClosure() {
         error('bad XRef entry');
       }
       if (this.encrypt && !suppressEncryption) {
-        try {
-          xrefEntry = parser.getObj(this.encrypt.createCipherTransform(num,
-                                                                       gen));
-        } catch (ex) {
-          // Almost all streams must be encrypted, but sometimes
-          // they are not, probably due to some broken generators.
-          // Retrying without encryption...
-          return this.fetch(ref, true);
-        }
+        xrefEntry = parser.getObj(this.encrypt.createCipherTransform(num, gen));
       } else {
         xrefEntry = parser.getObj();
       }
@@ -1280,21 +1285,22 @@ var XRef = (function XRefClosure() {
     },
 
     fetchAsync: function XRef_fetchAsync(ref, suppressEncryption) {
-      return new Promise(function (resolve, reject) {
-          var tryFetch = function () {
-            try {
-              resolve(this.fetch(ref, suppressEncryption));
-            } catch (e) {
-              if (e instanceof MissingDataException) {
-                this.stream.manager.requestRange(e.begin, e.end, tryFetch);
-                return;
-              }
-              reject(e);
-            }
-          }.bind(this);
-          tryFetch();
-        }.bind(this));
-      },
+      var streamManager = this.stream.manager;
+      var xref = this;
+      return new Promise(function tryFetch(resolve, reject) {
+        try {
+          resolve(xref.fetch(ref, suppressEncryption));
+        } catch (e) {
+          if (e instanceof MissingDataException) {
+            streamManager.requestRange(e.begin, e.end, function () {
+              tryFetch(resolve, reject);
+            });
+            return;
+          }
+          reject(e);
+        }
+      });
+    },
 
     getCatalogObj: function XRef_getCatalogObj() {
       return this.root;

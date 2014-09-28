@@ -326,7 +326,7 @@ html[dir='rtl'] #toolbarContainer, .findbar, .secondaryToolbar {
 #loadingBar {
   position: relative;
   width: 100%;
-  height: 6px;
+  height: 4px;
   background-color: #333;
   border-bottom: 1px solid #333;
 }
@@ -409,6 +409,9 @@ html[dir='rtl'] .findbar {
   background-image: url(images/loading-small.png);
   background-repeat: no-repeat;
   background-position: right;
+}
+html[dir='rtl'] #findInput[data-status="pending"] {
+  background-position: left;
 }
 
 .secondaryToolbar {
@@ -1027,7 +1030,7 @@ html[dir='rtl'] .verticalToolbarSeparator {
 }
 
 .horizontalToolbarSeparator {
-  display: block; 
+  display: block;
   margin: 0 0 4px 0;
   height: 1px;
   width: 100%;
@@ -1305,8 +1308,6 @@ canvas {
   top: 0;
   right: 0;
   bottom: 0;
-  color: #000;
-  font-family: sans-serif;
   overflow: hidden;
 }
 
@@ -1315,13 +1316,18 @@ canvas {
   position: absolute;
   white-space: pre;
   cursor: text;
+  -webkit-transform-origin: 0% 0%;
+  -moz-transform-origin: 0% 0%;
+  -o-transform-origin: 0% 0%;
+  -ms-transform-origin: 0% 0%;
+  transform-origin: 0% 0%;
 }
 
 .textLayer .highlight {
   margin: -1px;
   padding: 1px;
 
-  background-color: rgba(180, 0, 170, 0.2);
+  background-color: rgb(180, 0, 170);
   border-radius: 4px;
 }
 
@@ -1338,14 +1344,20 @@ canvas {
 }
 
 .textLayer .highlight.selected {
-  background-color: rgba(0, 100, 0, 0.2);
+  background-color: rgb(0, 100, 0);
 }
 
 /* TODO: file FF bug to support ::-moz-selection:window-inactive
    so we can override the opaque grey background when the window is inactive;
    see https://bugzilla.mozilla.org/show_bug.cgi?id=706209 */
-::selection { background:rgba(0,0,255,0.3); }
-::-moz-selection { background:rgba(0,0,255,0.3); }
+::selection { background: rgba(0,0,255,0.3); }
+::-moz-selection { background: rgba(0,0,255,0.3); }
+
+.textLayer ::selection { background: rgb(0,0,255); }
+.textLayer ::-moz-selection { background: rgb(0,0,255); }
+.textLayer {
+  opacity: 0.2;
+}
 
 .annotationHighlight {
   position: absolute;
@@ -1394,7 +1406,7 @@ canvas {
 
 .annotLink > a /* -ms-a */ {
   background: url("data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAA\
-                   LAAAAAABAAEAAAIBR‌​AA7") 0 0 repeat;
+                   LAAAAAABAAEAAAIBRAA7") 0 0 repeat;
 }
 
 #errorWrapper {
@@ -1408,7 +1420,7 @@ canvas {
   font-size: 0.8em;
 }
 .loadingInProgress #errorWrapper {
-  top: 39px;
+  top: 37px;
 }
 
 #errorMessageLeft {
@@ -1489,7 +1501,7 @@ canvas {
 }
 
 .dialog .separator {
-  display: block; 
+  display: block;
   margin: 4px 0 4px 0;
   height: 1px;
   width: 100%;
@@ -1578,11 +1590,9 @@ html[dir='rtl'] #documentPropertiesOverlay .row > * {
 .debuggerShowText {
   background: none repeat scroll 0 0 yellow;
   color: blue;
-  opacity: 0.3;
 }
 .debuggerHideText:hover {
   background: none repeat scroll 0 0 yellow;
-  opacity: 0.3;
 }
 #PDFBug .stats {
   font-family: courier;
@@ -1672,7 +1682,7 @@ html[dir='rtl'] #documentPropertiesOverlay .row > * {
     background: url(images/toolbarButton-menuArrows@2x.png) no-repeat;
     background-size: 7px 16px;
   }
-  
+
   html[dir='ltr'] .toolbarButton#sidebarToggle::before {
     content: url(images/toolbarButton-sidebarToggle@2x.png);
   }
@@ -1884,7 +1894,7 @@ html[dir='rtl'] #documentPropertiesOverlay .row > * {
     z-index: 100;
   }
   .loadingInProgress #sidebarContainer {
-    top: 39px;
+    top: 37px;
   }
   #sidebarContent {
     top: 32px;
@@ -1962,4 +1972,3 @@ html[dir='rtl'] #documentPropertiesOverlay .row > * {
     display: none;
   }
 }
-
